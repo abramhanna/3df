@@ -3,3 +3,7 @@ __pycache__/
 .DS_Store
 viewer.html
 *.pdf
+*.3df.html
+test_report.3df
+test_report.pdf
+viewer.html
