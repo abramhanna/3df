@@ -15,8 +15,10 @@
 | `pptx2_3df.py` | Convert PowerPoint (`.pptx`) decks to `.3df`. For Google Slides, download as `.pptx` first |
 | `docx2_3df.py` | Convert Word or Google Docs (`.docx`) reports to `.3df`; GIFs keep playing and the text stays searchable |
 | `export_html.py` | Package any `.3df` as one `.html` that opens offline in any browser, and extract the `.3df` back out |
+| `pdf3df.py` | Ship a `.3df` inside an ordinary PDF that opens everywhere; extract it back; check files. See [docs/PDF-PROFILE.md](docs/PDF-PROFILE.md) |
+| `reader_template.html`, `build_reader.py` | Offline PDF reader (PDF.js) that plays 3DF content inside any PDF |
 | `viewer_template.html` | Browser viewer; `build_viewer.py` embeds a sample document into it |
-| `vendor/` | Viewer libraries (JSZip, three.js r128) inlined by `export_html.py`, with their MIT licenses |
+| `vendor/` | Viewer libraries inlined by the HTML tools: JSZip and three.js r128 (MIT), PDF.js 3.11 (Apache 2.0), with their licenses |
 | `make_sample.py`, `make_test_deck.py`, `make_test_report.py` | Generate the sample document and converter test files |
 | `make_readme_gif.py` | Render `docs/sample.gif`, the animated preview above |
  
@@ -30,6 +32,9 @@ python pptx2_3df.py deck.pptx             # needs LibreOffice installed
 python build_viewer.py                    # writes viewer.html with sample.3df embedded
 python docx2_3df.py report.docx           # Google Docs: File > Download > .docx; needs LibreOffice
 python export_html.py export report.3df   # report.3df.html: send it, it opens offline anywhere
+python docx2_3df.py report.docx report.3df --pdf report.print.pdf
+python pdf3df.py wrap report.3df report.pdf --print report.print.pdf   # a real PDF/A-3 with the .3df inside
+python build_reader.py report.pdf        # reader.html plays it; any other PDF reader shows stills
 ```
 
 ## Sending a .3df to someone

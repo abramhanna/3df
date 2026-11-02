@@ -32,8 +32,24 @@ import pymupdf
 from docx import Document
 from PIL import Image, ImageSequence
 
+import subprocess
+
 import threedf
-from pptx2_3df import find_soffice, render_pdf
+from pptx2_3df import find_soffice
+
+# PDF/A-3b: archival PDF that allows attached files (needed by pdf3df.py), tagged for accessibility
+PDFA3_FILTER = 'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"3"},"UseTaggedPDF":{"type":"boolean","value":"true"}}'
+
+
+def render_pdf(docx, workdir, soffice):
+    profile = Path(workdir, "lo_profile").resolve().as_uri()
+    subprocess.run([soffice, f"-env:UserInstallation={profile}", "--headless",
+                    "--convert-to", PDFA3_FILTER, "--outdir", str(workdir), str(docx)],
+                   check=True, capture_output=True, timeout=600)
+    pdf = Path(workdir, Path(docx).stem + ".pdf")
+    if not pdf.exists():
+        sys.exit("LibreOffice ran but produced no PDF. Check the document opens in LibreOffice Writer.")
+    return pdf
 
 PT_PER_MM = 72 / 25.4
 INVISIBLE = "#00000000"        # 8-digit CSS hex: fully transparent text

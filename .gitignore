@@ -7,3 +7,8 @@ viewer.html
 test_report.3df
 test_report.pdf
 viewer.html
+*.print.pdf
+*.reader.html
+reader.html
+test_report.pdf
+sample.pdf

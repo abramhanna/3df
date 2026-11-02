@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>3DF PDF Reader</title>
+<style>
+:root{
+  --desk:#D3D8DE; --bar:#F4F6F8; --bar-line:#BCC3CC; --ink:#1C232E; --muted:#5A6270;
+  --accent:#2F5BD3; --accent-ink:#FFFFFF; --ok:#1F7A4D; --ok-bg:#E3F3EA; --plain-bg:#ECEFF3;
+  --shadow:0 1px 2px rgba(20,30,45,.18),0 6px 24px rgba(20,30,45,.12);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --desk:#1B2029; --bar:#252B35; --bar-line:#3A424F; --ink:#E6EAF0; --muted:#A3ACB9;
+    --accent:#7FA0FF; --accent-ink:#0F1520; --ok:#7FD3A6; --ok-bg:#1E3329; --plain-bg:#2B323D;
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 28px rgba(0,0,0,.45); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --desk:#1B2029; --bar:#252B35; --bar-line:#3A424F; --ink:#E6EAF0; --muted:#A3ACB9;
+  --accent:#7FA0FF; --accent-ink:#0F1520; --ok:#7FD3A6; --ok-bg:#1E3329; --plain-bg:#2B323D;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 28px rgba(0,0,0,.45); color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--desk);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding-bottom:env(safe-area-inset-bottom,0px)}
+header{position:sticky;top:0;z-index:5;background:var(--bar);border-bottom:1px solid var(--bar-line);
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.brand{font-weight:650;white-space:nowrap}
+.doc{color:var(--muted);flex:1 1 140px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{font:inherit;font-weight:550;border:1px solid var(--bar-line);background:transparent;color:var(--ink);
+  border-radius:8px;padding:7px 12px;cursor:pointer;min-height:36px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button[aria-pressed="true"]{background:var(--ink);color:var(--bar);border-color:var(--ink)}
+.status{flex-basis:100%;font-size:13px;border-radius:8px;padding:7px 10px;display:none}
+.status.on{display:block}
+.status.found{background:var(--ok-bg);color:var(--ok)}
+.status.plain{background:var(--plain-bg);color:var(--muted)}
+main{max-width:860px;margin:0 auto;padding:16px}
+.page{position:relative;margin:0 auto 16px;background:#fff;box-shadow:var(--shadow);width:100%}
+.page canvas{display:block;width:100%;height:auto}
+.live{position:absolute;display:block;object-fit:contain;pointer-events:none}
+body.stills .live{display:none}
+.msg{text-align:center;color:var(--muted);padding:48px 16px}
+.msg strong{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
+.drop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--desk) 85%,transparent);font-size:20px;font-weight:600;border:3px dashed var(--accent)}
+.drop.on{display:flex}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">3DF Reader</span>
+  <span class="doc" id="docName"></span>
+  <button id="stillBtn" aria-pressed="false" hidden>Show stills</button>
+  <button class="primary" id="openBtn">Open PDF</button>
+  <input type="file" id="file" accept=".pdf,application/pdf" hidden>
+  <div class="status" id="status" role="status"></div>
+</header>
+<main id="main"><div class="msg"><strong>Opening…</strong></div></main>
+<div class="drop" id="drop">Drop a PDF to open it</div>
+
+<script type="text/plain" id="pdf-worker">__PDF_WORKER__</script>
+__PDFJS__
+__JSZIP__
+<script type="application/pdf" id="demo-pdf" data-name="__DEMO_NAME__" data-encoding="base64">__DEMO_B64__</script>
+<script>
+const $ = id => document.getElementById(id);
+const THREEDF_MIME = "application/vnd.3df+zip";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  URL.createObjectURL(new Blob([$("pdf-worker").textContent], {type: "text/javascript"}));
+
+let generation = 0, urls = [];
+const b64 = s => { const b = atob(s.replace(/\s+/g, "")); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+const MIME = {gif: "image/gif", webp: "image/webp", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg"};
+
+function message(title, body){
+  $("main").innerHTML = "";
+  const m = document.createElement("div"); m.className = "msg";
+  const t = document.createElement("strong"); t.textContent = title; m.appendChild(t);
+  if (body) m.appendChild(document.createTextNode(body));
+  $("main").appendChild(m);
+}
+function status(kind, text){ const s = $("status"); s.className = "status on " + kind; s.textContent = text; }
+
+// A 3DF-enabled PDF carries its .3df as an attachment (associated file, relationship Alternative).
+async function find3DF(pdf){
+  const att = await pdf.getAttachments().catch(() => null);
+  if (!att) return null;
+  for (const a of Object.values(att)) {
+    const bytes = a.content;
+    const looksRight = a.filename.toLowerCase().endsWith(".3df") ||
+      new TextDecoder().decode(bytes.slice(30, 38 + THREEDF_MIME.length)).includes(THREEDF_MIME);
+    if (!looksRight) continue;
+    try {
+      const zip = await JSZip.loadAsync(bytes);
+      const mt = zip.file("mimetype");
+      if (!mt || (await mt.async("string")).trim() !== THREEDF_MIME) continue;
+      const doc = JSON.parse(await zip.file("document.json").async("string"));
+      return {zip, doc, name: a.filename};
+    } catch (e) { /* not a usable .3df; keep looking */ }
+  }
+  return null;
+}
+
+async function openPDF(bytes, name){
+  const gen = ++generation;
+  urls.forEach(u => URL.revokeObjectURL(u)); urls = [];
+  $("docName").textContent = name; $("stillBtn").hidden = true; $("status").className = "status";
+  message("Opening…");
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({data: bytes, isEvalSupported: false}).promise; }
+  catch (e) { message("This file couldn't be opened", " It doesn't look like a PDF."); return; }
+  const tdf = await find3DF(pdf);
+  if (gen !== generation) return;
+
+  const live = [];          // [{pageIndex, el, url}]
+  if (tdf) {
+    for (const [pi, page] of (tdf.doc.pages || []).entries()) {
+      for (const el of page.elements || []) {
+        const ext = String(el.src || "").split(".").pop().toLowerCase();
+        if (el.type === "image" && el.fallback && (ext === "gif" || ext === "webp")) {
+          const f = tdf.zip.file(el.src); if (!f) continue;
+          const url = URL.createObjectURL(new Blob([await f.async("uint8array")], {type: MIME[ext]}));
+          urls.push(url); live.push({pi, el, url});
+        }
+      }
+    }
+    const models = (tdf.doc.pages || []).flatMap(p => p.elements || []).filter(e => e.type === "model").length;
+    status("found", `3DF content found in this PDF: ${live.length} animated figure${live.length === 1 ? "" : "s"} playing in place`
+      + (models ? `. ${models} 3D model${models === 1 ? "" : "s"} shown as stills in this reader.` : "."));
+    $("stillBtn").hidden = !live.length;
+  } else {
+    status("plain", "Plain PDF: no 3DF content inside, so it looks the same as in any other reader.");
+  }
+
+  $("main").innerHTML = "";
+  const W = tdf ? tdf.doc.page.width_mm : null, H = tdf ? tdf.doc.page.height_mm : null;
+  const cssWidth = Math.min($("main").clientWidth - 32, 828);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    if (gen !== generation) return;
+    const base = page.getViewport({scale: 1});
+    const vp = page.getViewport({scale: cssWidth * dpr / base.width});
+    const wrap = document.createElement("div"); wrap.className = "page";
+    wrap.setAttribute("role", "img"); wrap.setAttribute("aria-label", `Page ${i}`);
+    wrap.style.aspectRatio = `${base.width} / ${base.height}`;
+    const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    wrap.appendChild(c); $("main").appendChild(wrap);
+    await page.render({canvasContext: c.getContext("2d"), viewport: vp}).promise;
+    for (const {pi, el, url} of live) {
+      if (pi !== i - 1) continue;
+      const img = document.createElement("img"); img.className = "live"; img.src = url; img.alt = el.alt || "";
+      Object.assign(img.style, {left: `${el.x / W * 100}%`, top: `${el.y / H * 100}%`,
+        width: `${el.w / W * 100}%`, height: `${el.h / H * 100}%`});
+      wrap.appendChild(img);
+    }
+  }
+}
+
+$("stillBtn").onclick = () => {
+  const on = document.body.classList.toggle("stills");
+  $("stillBtn").setAttribute("aria-pressed", on); $("stillBtn").textContent = on ? "Show motion" : "Show stills";
+};
+$("openBtn").onclick = () => $("file").click();
+$("file").onchange = async e => { const f = e.target.files[0]; if (f) openPDF(new Uint8Array(await f.arrayBuffer()), f.name); e.target.value = ""; };
+let depth = 0;
+addEventListener("dragenter", e => { e.preventDefault(); depth++; $("drop").classList.add("on"); });
+addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; $("drop").classList.remove("on"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", async e => { e.preventDefault(); depth = 0; $("drop").classList.remove("on");
+  const f = e.dataTransfer.files[0]; if (f) openPDF(new Uint8Array(await f.arrayBuffer()), f.name); });
+
+const demo = $("demo-pdf");
+if (demo.textContent.trim() && !demo.textContent.includes("__DEMO_B64__")) openPDF(b64(demo.textContent), demo.dataset.name);
+else message("Open a PDF", " Any PDF works. If it carries 3DF content, its figures move.");
+</script>
+</body>
+</html>
