@@ -62,15 +62,15 @@ body.stills .live{display:none}
 <main id="main"><div class="msg"><strong>Opening…</strong></div></main>
 <div class="drop" id="drop">Drop a PDF to open it</div>
 
-<script type="text/plain" id="pdf-worker">__PDF_WORKER__</script>
+<script id="pdf-worker">__PDF_WORKER__</script>
 __PDFJS__
 __JSZIP__
 <script type="application/pdf" id="demo-pdf" data-name="__DEMO_NAME__" data-encoding="base64">__DEMO_B64__</script>
 <script>
 const $ = id => document.getElementById(id);
 const THREEDF_MIME = "application/vnd.3df+zip";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  URL.createObjectURL(new Blob([$("pdf-worker").textContent], {type: "text/javascript"}));
+// PDF.js runs on the page using the worker code loaded above (window.pdfjsWorker). Sandboxed
+// previews and email clients often forbid background workers, so this works in more places.
 
 let generation = 0, urls = [];
 const b64 = s => { const b = atob(s.replace(/\s+/g, "")); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
@@ -111,8 +111,13 @@ async function openPDF(bytes, name){
   $("docName").textContent = name; $("stillBtn").hidden = true; $("status").className = "status";
   message("Opening…");
   let pdf;
-  try { pdf = await pdfjsLib.getDocument({data: bytes, isEvalSupported: false}).promise; }
-  catch (e) { message("This file couldn't be opened", " It doesn't look like a PDF."); return; }
+  try {
+    pdf = await pdfjsLib.getDocument({data: bytes, isEvalSupported: false}).promise;
+  } catch (e) {
+    const notPdf = e && (e.name === "InvalidPDFException" || /Invalid PDF/i.test(e.message || ""));
+    message("This file couldn't be opened", notPdf ? " It doesn't look like a PDF." : " " + (e && e.message || e));
+    return;
+  }
   const tdf = await find3DF(pdf);
   if (gen !== generation) return;
 
@@ -123,8 +128,8 @@ async function openPDF(bytes, name){
         const ext = String(el.src || "").split(".").pop().toLowerCase();
         if (el.type === "image" && el.fallback && (ext === "gif" || ext === "webp")) {
           const f = tdf.zip.file(el.src); if (!f) continue;
-          const url = URL.createObjectURL(new Blob([await f.async("uint8array")], {type: MIME[ext]}));
-          urls.push(url); live.push({pi, el, url});
+          const url = `data:${MIME[ext]};base64,` + await f.async("base64");
+          live.push({pi, el, url});
         }
       }
     }
