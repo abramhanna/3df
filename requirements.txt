@@ -3,3 +3,5 @@ lxml
 pymupdf
 pillow
 numpy
+python-docx
+playwright
