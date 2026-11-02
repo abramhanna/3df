@@ -16,7 +16,8 @@
 | `docx2_3df.py` | Convert Word or Google Docs (`.docx`) reports to `.3df`; GIFs keep playing and the text stays searchable |
 | `export_html.py` | Package any `.3df` as one `.html` that opens offline in any browser, and extract the `.3df` back out |
 | `pdf3df.py` | Ship a `.3df` inside an ordinary PDF that opens everywhere; extract it back; check files. See [docs/PDF-PROFILE.md](docs/PDF-PROFILE.md) |
-| `3df2html.py` | Convert a `.3df` to one `.html` with **no JavaScript**: GIFs still play, GIFs marked `scrub` can be dragged through by hand (CSS scroll-driven animations), it opens offline in any browser and in previews that block scripts, and prints with stills |
+| `3df2html.py` | Convert a `.3df` to one `.html` with **no JavaScript**: GIFs still play, GIFs marked `scrub` can be dragged through by hand, and 3D models become figures you turn (drag sideways) and tilt (drag up or down), all with CSS scroll-driven animations, it opens offline in any browser and in previews that block scripts, and prints with stills |
+| `render_views.py` | Pre-render a glTF model from 36 directions at 4 heights with the viewer's own three.js camera and lighting (headless Chromium via Playwright) |
 | `3df2epub.py` | Convert a `.3df` to a fixed-layout EPUB 3, so readers people already have play its GIFs: Apple Books (iPhone, iPad, Mac), Google Play Books (Android). Passes EPUBCheck |
 | `reader_template.html`, `build_reader.py` | Offline PDF reader (PDF.js) that plays 3DF content inside any PDF |
 | `viewer_template.html` | Browser viewer; `build_viewer.py` embeds a sample document into it |
@@ -44,6 +45,10 @@ python 3df2html.py report.3df            # report.html: no scripts, GIFs play in
 ## Dragging instead of looping
 
 Start a GIF's alt text with `[drag]` in Word or Google Docs and `docx2_3df.py` marks it `"scrub": true`. In `3df2html.py` output, swiping sideways across that figure steps through its frames, so a turntable GIF becomes a model you turn by hand and a deployment GIF one you unfold yourself. It needs no script. Readers that don't know `scrub` just play the GIF. This is a proposed field, not yet in SPEC v0.1.
+
+## Turning 3D models without a script
+
+`3df2html.py` renders each 3D model with `render_views.py` (144 views, about 1–1.5 MB as WebP) and lays them out so that dragging sideways turns the model and dragging up or down tilts it. It's one axis of turning plus four camera heights, not free rotation or zoom; the live viewer from `export_html.py` still does that. Use `--no-views` to show the model's still instead.
 
 ## Sending a .3df to someone
 

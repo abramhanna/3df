@@ -4,3 +4,6 @@ pymupdf
 pillow
 numpy
 python-docx
+pikepdf
+reportlab
+playwright

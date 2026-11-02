@@ -20,6 +20,9 @@ img.el{object-fit:contain}
 .scrub>img,.scrub .f{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
 .scrub>img.still{display:none}
 .scrub .frames,.scrub .scroller,.scrub .hint{display:none}
+.orbit{overflow:hidden}
+.orbit>img,.orbit .f{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+.orbit .oframes,.orbit .oscroller,.orbit .hint{display:none}
 @keyframes on{from,to{opacity:1}}
 @supports (animation-timeline: scroll()) {
   .scrub .gifplay{display:none}
@@ -28,7 +31,14 @@ img.el{object-fit:contain}
   .scrub .scroller{display:block;position:absolute;inset:0;overflow-x:scroll;overflow-y:hidden;
     scrollbar-width:thin;overscroll-behavior-x:contain;touch-action:pan-x;cursor:ew-resize;z-index:1}
   .scrub .track{width:500%;height:1px}
-  .scrub .hint{display:block;position:absolute;right:2%;bottom:3%;z-index:2;pointer-events:none;
+  .orbit .ostill{display:none}
+  .orbit .oframes{display:block;position:absolute;inset:0}
+  .orbit .orow{position:absolute;inset:0;opacity:0;animation-duration:auto;animation-timing-function:linear}
+  .orbit .f{opacity:0;animation-duration:auto;animation-timing-function:linear}
+  .orbit .oscroller{display:block;position:absolute;inset:0;overflow:scroll;scrollbar-width:thin;
+    overscroll-behavior-x:contain;overscroll-behavior-y:auto;touch-action:pan-x pan-y;cursor:grab;z-index:1}
+  .orbit .otrack{width:500%}
+  .orbit .hint,.scrub .hint{display:block;position:absolute;right:2%;bottom:3%;z-index:2;pointer-events:none;
     font:600 2.2cqw/1 system-ui,sans-serif;color:#1C232E;background:rgba(255,255,255,.82);
     border-radius:99px;padding:.6cqw 1.2cqw}
 }
@@ -36,7 +46,8 @@ img.el{object-fit:contain}
 @media print{
   html,body{background:#fff;padding:0}
   .page{width:215.9mm;max-width:none;margin:0;box-shadow:none;break-after:page}
-  .live,.scrub .gifplay,.scrub .frames,.scrub .scroller,.scrub .hint{display:none!important} .still,.scrub>img.still{display:block}
+  .live,.scrub .gifplay,.scrub .frames,.scrub .scroller,.hint,.orbit .oframes,.orbit .oscroller{display:none!important}
+  .orbit .ostill{display:block!important} .still,.scrub>img.still{display:block}
 }
 </style>
 </head>
