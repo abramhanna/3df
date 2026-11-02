@@ -34,6 +34,15 @@ def _inline(code):
     return "<script>\n" + code.replace("</script", "<\\/script") + "\n</script>"
 
 
+def _replace_once(html, old, new):
+    """Template substitution that fails loudly if viewer_template.html changed shape."""
+    n = html.count(old)
+    if n != 1:
+        raise threedf.ThreeDFError(f"viewer_template.html: expected 1 match for {old[:50]!r}, found {n}; "
+                                   "update export_html.py")
+    return html.replace(old, new)
+
+
 def export(src, out=None):
     src = Path(src)
     errs = threedf.validate(src)
@@ -48,7 +57,7 @@ def export(src, out=None):
     html = (HERE / "viewer_template.html").read_text(encoding="utf-8")
     html = re.sub(r'<link rel="preconnect"[^>]*>\n?', "", html)              # no web fonts: system fonts only
     html = re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>\n?', "", html)
-    html = html.replace("<title>3DF Viewer</title>", f"<title>{_esc(title)}</title>")
+    html = _replace_once(html, "<title>3DF Viewer</title>", f"<title>{_esc(title)}</title>")
     for key, (url, file) in CDN.items():
         tag = f'<script src="{url}"></script>'
         if tag not in html:
@@ -58,14 +67,14 @@ def export(src, out=None):
 
     payload = base64.b64encode(src.read_bytes()).decode()
     payload = "\n".join(payload[i:i + 120] for i in range(0, len(payload), 120))
-    html = html.replace('<script>\nconst SAMPLE_B64 = "__SAMPLE_B64__";',
+    html = _replace_once(html, '<script>\nconst SAMPLE_B64 = "__SAMPLE_B64__";',
                         f"{TAG_OPEN}\n{payload}\n</script>\n<script>\n"
-                        'const SAMPLE_B64 = document.getElementById("threedf-document").textContent.replace(/\\s+/g, "");', 1)
-    html = html.replace('open3DF(b64ToBytes(SAMPLE_B64), "sample.3df")',
+                        'const SAMPLE_B64 = document.getElementById("threedf-document").textContent.replace(/\\s+/g, "");')
+    html = _replace_once(html, 'open3DF(b64ToBytes(SAMPLE_B64), "sample.3df")',
                         f"open3DF(b64ToBytes(SAMPLE_B64), {json.dumps(src.name)})")
     if not has_models:
-        html = html.replace("if(!window.JSZip || !window.THREE || !THREE.GLTFLoader)", "if(!window.JSZip)")
-    html = html.replace("Check your connection and reload.", "Try opening this file in Safari, Chrome or Edge.")
+        html = _replace_once(html, "if(!window.JSZip || !window.THREE || !THREE.GLTFLoader)", "if(!window.JSZip)")
+    html = _replace_once(html, "Check your connection and reload.", "Try opening this file in Safari, Chrome or Edge.")
 
     if "__SAMPLE_B64__" in html or TAG_OPEN not in html:
         raise threedf.ThreeDFError("viewer_template.html changed shape; update export_html.py")

@@ -24,6 +24,8 @@ with --gifs FOLDER and they are matched against the pictures in the document.
 Requires: LibreOffice, and `pip install python-docx pymupdf pillow numpy`.
 """
 import argparse
+import hashlib
+import io
 import json
 import shutil
 import sys
@@ -98,24 +100,59 @@ def animated_gifs(docx, extra_dir=None):
     return found
 
 
-def alt_texts(docx):
-    """Map media file name -> author-written alt text (Word/Docs 'Alt text' field)."""
-    out = {}
+def pictures(docx):
+    """Every picture in the body, in document order: media file name, alt text, and crop
+    as fractions (left, top, right, bottom) from <a:srcRect>, which Word and Google Docs write."""
     d = Document(docx)
-    for shape in d.inline_shapes:
-        inline = shape._inline
-        descr = (inline.docPr.get("descr") or inline.docPr.get("title") or "").strip()
-        blips = inline.xpath(".//a:blip/@r:embed")
-        if descr and blips:
-            part = d.part.related_parts.get(blips[0])
-            if part is not None:
-                out[Path(str(part.partname)).name] = descr
+    out = []
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
+    for pic in d.element.body.iter("{http://schemas.openxmlformats.org/drawingml/2006/picture}pic"):
+        blip = pic.find(f".//{A}blip")
+        part = d.part.related_parts.get(blip.get(f"{R}embed")) if blip is not None else None
+        holder = pic
+        while holder is not None and holder.tag not in (f"{WP}inline", f"{WP}anchor"):
+            holder = holder.getparent()
+        docpr = holder.find(f"{WP}docPr") if holder is not None else None
+        alt = ((docpr.get("descr") or docpr.get("title") or "") if docpr is not None else "").strip()
+        src = pic.find(f".//{A}srcRect")
+        crop = tuple(max(0.0, int(src.get(k, 0)) / 100000) if src is not None else 0.0 for k in ("l", "t", "r", "b"))
+        out.append({"media": Path(str(part.partname)).name if part is not None else "", "alt": alt, "crop": crop})
     return out
 
 
-def best_match(pix_img, bbox, gifs):
+def fit_gif(blob, crop, display_aspect):
+    """Crop a GIF and stretch it to the shape it is shown at, keeping its timing.
+    Returns the original bytes when nothing needs changing."""
+    im = Image.open(io.BytesIO(blob))
+    W, H = im.size
+    l, t, r, b = crop
+    box = (round(l * W), round(t * H), round(W - r * W), round(H - b * H))
+    cw, ch = box[2] - box[0], box[3] - box[1]
+    if cw < 2 or ch < 2:
+        return blob
+    nw, nh = cw, ch
+    if display_aspect and abs(cw / ch - display_aspect) / display_aspect > 0.02:
+        nh = max(1, round(cw / display_aspect))
+    if box == (0, 0, W, H) and (nw, nh) == (W, H):
+        return blob
+    frames, durations = [], []
+    for f in ImageSequence.Iterator(im):
+        durations.append(f.info.get("duration", im.info.get("duration", 100)))
+        fr = f.convert("RGBA").crop(box)
+        frames.append(fr.resize((nw, nh), Image.LANCZOS) if (nw, nh) != (cw, ch) else fr)
+    out = io.BytesIO()
+    frames[0].save(out, "GIF", save_all=True, append_images=frames[1:], duration=durations,
+                   loop=im.info.get("loop", 0), disposal=2)
+    return out.getvalue()
+
+
+def best_match(pix_img, gifs):
+    """Compare against the embedded picture itself. Its pixel shape is the GIF's, however the
+    document crops or stretches it on the page, so cropping and resizing don't break matching."""
     s = signature(pix_img)
-    aspect = (bbox.width / bbox.height) if bbox.height else 0
+    aspect = pix_img.width / pix_img.height if pix_img.height else 0
     best, score = None, MATCH_LIMIT
     for g in gifs:
         if aspect and abs(g["aspect"] - aspect) / g["aspect"] > 0.04:
@@ -172,7 +209,7 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
     if docx.suffix.lower() != ".docx":
         sys.exit("Only .docx is supported. In Google Docs use File > Download > Microsoft Word (.docx).")
     gifs = animated_gifs(docx, gif_dir)
-    alts = alt_texts(docx)
+    pics = pictures(docx)
     props = Document(docx).core_properties
     warnings = []
     if not gifs:
@@ -187,6 +224,14 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
         root = Path(tmp, "doc")
         (root / "assets").mkdir(parents=True)
         used, pages = {}, []
+        # LibreOffice draws pictures in document order, so the n-th image in the PDF is the
+        # n-th picture in the .docx. Only trust that when the counts agree.
+        n_drawn = sum(1 for pg in pdoc for info in pg.get_image_info(xrefs=True) if info.get("xref"))
+        geometry = n_drawn == len(pics)
+        if not geometry and pics:
+            warnings.append(f"The PDF draws {n_drawn} pictures but the document has {len(pics)}; "
+                            "crops and alt text may not be applied.")
+        pic_index = -1
 
         for i, page in enumerate(pdoc, 1):
             if abs(page.rect.width / PT_PER_MM - W_mm) > 0.5 or abs(page.rect.height / PT_PER_MM - H_mm) > 0.5:
@@ -202,7 +247,13 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
             for k, info in enumerate(page.get_image_info(xrefs=True), 1):
                 if not info.get("xref"):
                     continue
-                bbox = pymupdf.Rect(info["bbox"]) & page.rect
+                pic_index += 1
+                pic = pics[pic_index] if geometry else {"media": "", "alt": "", "crop": (0.0, 0.0, 0.0, 0.0)}
+                # info["bbox"] is where the whole picture is placed; a crop clips it to a smaller window
+                full = pymupdf.Rect(info["bbox"])
+                l, t, r, b = pic["crop"]
+                bbox = pymupdf.Rect(full.x0 + l * full.width, full.y0 + t * full.height,
+                                    full.x1 - r * full.width, full.y1 - b * full.height) & page.rect
                 if bbox.is_empty or bbox.width < 4 or bbox.height < 4:
                     continue
                 try:
@@ -212,14 +263,16 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
                     shown = Image.frombytes("RGBA" if p.alpha else "RGB", (p.width, p.height), p.samples)
                 except Exception:
                     continue
-                g = best_match(shown, bbox, gifs)
+                g = best_match(shown, gifs)
                 if g is None:
                     continue
-                src = used.get(g["name"])
-                if src is None:                      # store each GIF once, however often it appears
+                blob = fit_gif(g["blob"], pic["crop"], bbox.width / bbox.height)
+                key = (g["name"], hashlib.md5(blob).hexdigest())
+                src = used.get(key)
+                if src is None:                      # store each distinct GIF once, however often it appears
                     src = f"assets/anim{len(used) + 1}.gif"
-                    (root / src).write_bytes(g["blob"])
-                    used[g["name"]] = src
+                    (root / src).write_bytes(blob)
+                    used[key] = src
                 scale = bg.width / page.rect.width
                 crop = bg.crop((round(bbox.x0 * scale), round(bbox.y0 * scale),
                                 round(bbox.x1 * scale), round(bbox.y1 * scale)))
@@ -228,7 +281,7 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
                 elements.append({"type": "image", "x": round(bbox.x0 * sx, 2), "y": round(bbox.y0 * sy, 2),
                                  "w": round(bbox.width * sx, 2), "h": round(bbox.height * sy, 2),
                                  "src": src, "fallback": fb, "z": 1,
-                                 "alt": alts.get(g["name"]) or caption_below(lines, bbox) or "Animated figure"})
+                                 "alt": pic["alt"] or caption_below(lines, bbox) or "Animated figure"})
                 alt_text = elements[-1]["alt"]
                 if alt_text.lower().startswith("[drag]"):        # author asked for hand control
                     elements[-1]["alt"] = alt_text[6:].strip() or "Animated figure"
@@ -244,7 +297,8 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
                                  "font_size_pt": round(ln["size"], 1), "color": INVISIBLE, "z": 2})
             pages.append({"elements": elements})
 
-        missing = [g["name"] for g in gifs if g["name"] not in used]
+        placed = {name for name, _ in used}
+        missing = [g["name"] for g in gifs if g["name"] not in placed]
         if missing:
             warnings.append("Could not place: " + ", ".join(missing) + " (not found on any page)")
         doc = {"3df": threedf.SPEC_VERSION,

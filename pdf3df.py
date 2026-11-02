@@ -266,8 +266,16 @@ def check(path):
     lines.append(f"3DF marker in metadata: {ver.group(1) if ver else 'none'}")
     spec, data = _find_3df(pdf)
     if data is None:
+        if ver:      # metadata promises a 3DF document that isn't there
+            dangling = [str(s.get("/UF", s.get("/F", "?"))) for s in pdf.Root.get("/AF", Array())
+                        if str(s.get("/UF", s.get("/F", ""))).endswith(".3df")]
+            lines.append("The metadata declares 3DF " + ver.group(1) + ", but "
+                         + (f"the associated file {dangling[0]} has no embedded data." if dangling
+                            else "no 3DF document is attached as an associated file (/AF)."))
+            lines.append("PROBLEMS FOUND")
+            return False, lines
         lines.append("No 3DF document attached: this is a plain PDF.")
-        return bool(ver) is False, lines
+        return True, lines
     rel = str(spec.get("/AFRelationship", ""))
     lines.append(f"Attached {spec.get('/UF', spec.get('/F'))} ({len(data) / 1e6:.2f} MB), relationship {rel}")
     if rel != "/Alternative":
