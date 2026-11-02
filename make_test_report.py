@@ -54,6 +54,11 @@ def photo_png():
     buf = io.BytesIO(); im.save(buf, "PNG"); return buf.getvalue()
 
 
+def alt(shape, text):
+    """Set the picture's alt text, as Word's and Google Docs' "Alt text" box does."""
+    shape._inline.docPr.set("descr", text)
+
+
 def main(frames_dir=None):
     doc = Document()
     sec = doc.sections[0]
@@ -76,12 +81,13 @@ def main(frames_dir=None):
     doc.add_heading("2. Deployment sequence", 1)
     doc.add_paragraph("Figure 1 shows the panel stack unfolding from its stowed state. The motion is the same "
                       "sequence the flight unit will perform after separation.")
-    doc.add_picture(io.BytesIO((HERE / "sample/assets/deploy.gif").read_bytes()), width=Mm(150))
+    alt(doc.add_picture(io.BytesIO((HERE / "sample/assets/deploy.gif").read_bytes()), width=Mm(150)),
+        "[drag] Accordion-folded panels unfolding from the stowed stack")
     cap = doc.add_paragraph("Figure 1. Panel deployment sequence (animated).")
     cap.runs[0].font.size = Pt(9); cap.runs[0].italic = True
 
     doc.add_paragraph("For comparison, the stowed configuration before release:")
-    doc.add_picture(io.BytesIO(photo_png()), width=Mm(140))
+    alt(doc.add_picture(io.BytesIO(photo_png()), width=Mm(140)), "Nine stowed panels side by side")
     cap = doc.add_paragraph("Figure 2. Stowed configuration (still image).")
     cap.runs[0].font.size = Pt(9); cap.runs[0].italic = True
 
@@ -100,7 +106,7 @@ def main(frames_dir=None):
     doc.add_paragraph("Figure 3 turns the as-built truss through a full revolution so reviewers can check "
                       "bay alignment from every side without opening CAD.")
     gif2 = turntable_gif(frames_dir) if frames_dir else load_chart_gif()
-    doc.add_picture(io.BytesIO(gif2), width=Mm(150))
+    alt(doc.add_picture(io.BytesIO(gif2), width=Mm(150)), "[drag] Four-bay truss turning through a full revolution")
     cap = doc.add_paragraph("Figure 3. As-built truss, full revolution (animated).")
     cap.runs[0].font.size = Pt(9); cap.runs[0].italic = True
 

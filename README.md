@@ -16,7 +16,7 @@
 | `docx2_3df.py` | Convert Word or Google Docs (`.docx`) reports to `.3df`; GIFs keep playing and the text stays searchable |
 | `export_html.py` | Package any `.3df` as one `.html` that opens offline in any browser, and extract the `.3df` back out |
 | `pdf3df.py` | Ship a `.3df` inside an ordinary PDF that opens everywhere; extract it back; check files. See [docs/PDF-PROFILE.md](docs/PDF-PROFILE.md) |
-| `3df2html.py` | Convert a `.3df` to one `.html` with **no JavaScript**: GIFs still play, it opens offline in any browser and in previews that block scripts, and prints with stills |
+| `3df2html.py` | Convert a `.3df` to one `.html` with **no JavaScript**: GIFs still play, GIFs marked `scrub` can be dragged through by hand (CSS scroll-driven animations), it opens offline in any browser and in previews that block scripts, and prints with stills |
 | `3df2epub.py` | Convert a `.3df` to a fixed-layout EPUB 3, so readers people already have play its GIFs: Apple Books (iPhone, iPad, Mac), Google Play Books (Android). Passes EPUBCheck |
 | `reader_template.html`, `build_reader.py` | Offline PDF reader (PDF.js) that plays 3DF content inside any PDF |
 | `viewer_template.html` | Browser viewer; `build_viewer.py` embeds a sample document into it |
@@ -40,6 +40,10 @@ python build_reader.py report.pdf        # reader.html plays it; any other PDF r
 python 3df2epub.py report.3df            # report.epub: GIFs play in Apple Books and Google Play Books
 python 3df2html.py report.3df            # report.html: no scripts, GIFs play in any browser or preview
 ```
+
+## Dragging instead of looping
+
+Start a GIF's alt text with `[drag]` in Word or Google Docs and `docx2_3df.py` marks it `"scrub": true`. In `3df2html.py` output, swiping sideways across that figure steps through its frames, so a turntable GIF becomes a model you turn by hand and a deployment GIF one you unfold yourself. It needs no script. Readers that don't know `scrub` just play the GIF. This is a proposed field, not yet in SPEC v0.1.
 
 ## Sending a .3df to someone
 

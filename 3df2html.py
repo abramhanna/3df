@@ -9,6 +9,11 @@ own. That means it works where scripts are blocked: phone file previews, email
 attachment previews and locked-down browsers. Every asset is inlined, so it
 opens offline. Printing uses each animated element's still fallback.
 
+Animated images marked "scrub": true (docx2_3df.py sets it when the alt text
+starts with [drag]) become figures you drag through: swiping or scrolling sideways
+across them steps through the frames, using CSS scroll-driven animations, still
+with no script. Browsers without that feature play the GIF instead.
+
 3D models appear as their still fallback (rotating them needs a script; use
 export_html.py for that).
 
@@ -23,6 +28,10 @@ import json
 import zipfile
 from pathlib import Path
 
+import io
+
+from PIL import Image, ImageSequence
+
 import threedf
 from export_html import TAG_OPEN
 
@@ -33,6 +42,49 @@ ANIMATED = {".gif", ".webp"}
 
 def esc(s):
     return html.escape(str(s), quote=True)
+
+
+SCRUB_REVS = 2          # turns available in one drag, since a scroller can't start in the middle without a script
+MAX_FRAMES = 72
+
+
+def gif_frames(blob):
+    """Data URLs for each frame of an animated image (JPEG, or PNG where there is transparency)."""
+    im = Image.open(io.BytesIO(blob))
+    frames = [f.convert("RGBA") for f in ImageSequence.Iterator(im)]
+    step = max(1, -(-len(frames) // MAX_FRAMES))
+    out = []
+    for f in frames[::step]:
+        buf = io.BytesIO()
+        if f.getextrema()[3][0] < 255:
+            f.save(buf, "PNG", optimize=True); mime = "image/png"
+        else:
+            f.convert("RGB").save(buf, "JPEG", quality=82, optimize=True); mime = "image/jpeg"
+        out.append(f"data:{mime};base64," + base64.b64encode(buf.getvalue()).decode())
+    return out
+
+
+def scrub_html(k, box, gif_url, still_url, alt, frames):
+    """A figure you drag through: an invisible horizontal scroller drives a CSS scroll
+    timeline, and each frame is visible only in its slice of that scroll. No script."""
+    n = len(frames)
+    total = n * SCRUB_REVS
+    imgs = []
+    for i, url in enumerate(frames):
+        ranges = ", ".join(f"{(r * n + i) / total * 100:.4f}% {(r * n + i + 1) / total * 100:.4f}%"
+                           for r in range(SCRUB_REVS))
+        fills = ", ".join("forwards" if (r == SCRUB_REVS - 1 and i == n - 1) else "none" for r in range(SCRUB_REVS))
+        names = ", ".join(["on"] * SCRUB_REVS)
+        tl = ", ".join([f"--s{k}"] * SCRUB_REVS)
+        imgs.append(f'<img class="f" src="{url}" alt="" style="animation-name:{names};animation-timeline:{tl};'
+                    f'animation-range:{ranges};animation-fill-mode:{fills}">')
+    return (f'<div class="el scrub" style="{box};timeline-scope:--s{k}">'
+            f'<img class="gifplay" src="{gif_url}" alt="{alt}">'
+            f'<div class="frames" aria-hidden="true">{"".join(imgs)}</div>'
+            f'<div class="scroller" style="scroll-timeline:--s{k} x" tabindex="0" role="slider" '
+            f'aria-label="Drag sideways to turn: {alt}" aria-valuemin="0" aria-valuemax="100"><div class="track"></div></div>'
+            f'<span class="hint" aria-hidden="true">&#8644; drag</span>'
+            f'<img class="still" src="{still_url}" alt="" aria-hidden="true"></div>')
 
 
 def css_color(c):
@@ -75,7 +127,10 @@ def convert(src, out=None, embed=False):
             alt = esc(el.get("alt", ""))
             if el["type"] == "image":
                 animated = Path(el["src"]).suffix.lower() in ANIMATED and el.get("fallback")
-                if animated:
+                frames = gif_frames(z.read(el["src"])) if animated and el.get("scrub") else []
+                if len(frames) > 1:
+                    parts.append(scrub_html(len(parts), box, data_url(el["src"]), data_url(el["fallback"]), alt, frames))
+                elif animated:
                     parts.append(f'<img class="el live" style="{box}" src="{data_url(el["src"])}" alt="{alt}">'
                                  f'<img class="el still" style="{box}" src="{data_url(el["fallback"])}" alt="" aria-hidden="true">')
                 else:
@@ -118,11 +173,27 @@ body{{margin:0;padding:16px;background:var(--desk)}}
 img.el{{object-fit:contain}}
 .t{{font-family:Georgia,"Times New Roman",serif;line-height:1.35;overflow:hidden;white-space:pre-wrap}}
 .still{{display:none}}
+.scrub{{overflow:hidden}}
+.scrub>img,.scrub .f{{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}}
+.scrub>img.still{{display:none}}
+.scrub .frames,.scrub .scroller,.scrub .hint{{display:none}}
+@keyframes on{{from,to{{opacity:1}}}}
+@supports (animation-timeline: scroll()) {{
+  .scrub .gifplay{{display:none}}
+  .scrub .frames{{display:block;position:absolute;inset:0}}
+  .scrub .f{{opacity:0;animation-duration:auto;animation-timing-function:linear}}
+  .scrub .scroller{{display:block;position:absolute;inset:0;overflow-x:scroll;overflow-y:hidden;
+    scrollbar-width:thin;overscroll-behavior-x:contain;touch-action:pan-x;cursor:ew-resize;z-index:1}}
+  .scrub .track{{width:500%;height:1px}}
+  .scrub .hint{{display:block;position:absolute;right:2%;bottom:3%;z-index:2;pointer-events:none;
+    font:600 2.2cqw/1 system-ui,sans-serif;color:#1C232E;background:rgba(255,255,255,.82);
+    border-radius:99px;padding:.6cqw 1.2cqw}}
+}}
 @page{{size:{W}mm {H}mm;margin:0}}
 @media print{{
   html,body{{background:#fff;padding:0}}
   .page{{width:{W}mm;max-width:none;margin:0;box-shadow:none;break-after:page}}
-  .live{{display:none}} .still{{display:block}}
+  .live,.scrub .gifplay,.scrub .frames,.scrub .scroller,.scrub .hint{{display:none!important}} .still,.scrub>img.still{{display:block}}
 }}
 </style>
 </head>

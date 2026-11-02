@@ -14,6 +14,10 @@ How it works
   3. The page's words go on top as an invisible text layer, so the document can be
      searched, selected, copied and read by screen readers, like a scanned PDF with OCR.
 
+Start a GIF's alt text with [drag] (Word and Google Docs both have an "Alt text"
+box) to mark it "scrub": readers that support it let the viewer drag through its
+frames instead of playing it on a loop. Readers that don't simply play it.
+
 If an exporter flattened your GIFs into still images, pass the original GIF files
 with --gifs FOLDER and they are matched against the pictures in the document.
 
@@ -225,6 +229,10 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
                                  "w": round(bbox.width * sx, 2), "h": round(bbox.height * sy, 2),
                                  "src": src, "fallback": fb, "z": 1,
                                  "alt": alts.get(g["name"]) or caption_below(lines, bbox) or "Animated figure"})
+                alt_text = elements[-1]["alt"]
+                if alt_text.lower().startswith("[drag]"):        # author asked for hand control
+                    elements[-1]["alt"] = alt_text[6:].strip() or "Animated figure"
+                    elements[-1]["scrub"] = True
 
             for ln in lines:
                 h_pt = (ln["y1"] - ln["y0"]) * 1.25
