@@ -13,6 +13,7 @@
 | `SPEC.md` | Format specification, v0.1 |
 | `threedf.py` | Pack, unpack and validate `.3df` files |
 | `pptx2_3df.py` | Convert PowerPoint (`.pptx`) decks to `.3df`. For Google Slides, download as `.pptx` first |
+| `convert_inbox.py` | Converts every Word file in `inbox/` into `outbox/<name>/`; run by the GitHub workflow on upload |
 | `docx2_3df.py` | Convert Word or Google Docs (`.docx`) reports to `.3df`; GIFs keep playing and the text stays searchable |
 | `export_html.py` | Package any `.3df` as one `.html` that opens offline in any browser, and extract the `.3df` back out |
 | `pdf3df.py` | Ship a `.3df` inside an ordinary PDF that opens everywhere; extract it back; check files. See [docs/PDF-PROFILE.md](docs/PDF-PROFILE.md) |
@@ -41,6 +42,10 @@ python build_reader.py report.pdf        # reader.html plays it; any other PDF r
 python 3df2epub.py report.3df            # report.epub: GIFs play in Apple Books and Google Play Books
 python 3df2html.py report.3df            # report.html: no scripts, GIFs play in any browser or preview
 ```
+
+## Converting without installing anything
+
+Upload a Word file (.docx) to the [`inbox`](inbox) folder on github.com (**Add file → Upload files**). A GitHub Actions workflow converts it on GitHub's computers, and a folder with the `.html`, `.pdf`, `.epub` and `.3df` versions appears in [`outbox`](outbox) a few minutes later, with a `REPORT.md` listing any warnings. Progress shows on the **Actions** tab. To do the same on your own computer: `python convert_inbox.py`.
 
 ## Dragging instead of looping
 
