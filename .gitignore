@@ -14,3 +14,6 @@ test_report.pdf
 sample.pdf
 *.epub
 sample.html
+
+# Conversion results are always kept, whatever their type
+!outbox/**
