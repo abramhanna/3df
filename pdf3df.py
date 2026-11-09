@@ -35,6 +35,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+import safety
 import threedf
 
 MIME = threedf.MIMETYPE
@@ -46,10 +47,24 @@ ANIMATED_EXT = {".gif", ".webp"}
 
 # ---------- reading the .3df ----------
 
+def open_pdf(path):
+    """pikepdf.open with a plain message instead of a traceback for missing or non-PDF files."""
+    if not Path(path).is_file():
+        raise threedf.ThreeDFError(f"{path} not found")
+    try:
+        return pikepdf.open(path)
+    except pikepdf.PdfError as e:
+        raise threedf.ThreeDFError(f"{Path(path).name} is not a readable PDF ({str(e).split(': ')[-1]})") from None
+
+
 def load_3df(path):
     errs = threedf.validate(path)
     if errs:
         raise threedf.ThreeDFError(f"{path} is not a valid .3df:\n" + "\n".join(errs))
+    try:
+        safety.check_3df(path)
+    except safety.UnsafePackage as e:
+        raise threedf.ThreeDFError(str(e)) from None
     z = zipfile.ZipFile(path)
     return z, json.loads(z.read("document.json"))
 
@@ -119,6 +134,19 @@ def draw_pages(z, doc):
 
 # ---------- structure ----------
 
+def page_rect(mediabox, W_mm, H_mm, el):
+    """Where a .3df element lands on a PDF page. A page whose size differs from the .3df's is
+    shown on the .3df page scaled uniformly to fit and centred (as docx2_3df.py lays it out),
+    so map back through that; for same-size pages this is a plain mm-to-points conversion."""
+    x0, y0, x1, y1 = (float(v) for v in mediabox)
+    pw, ph = (x1 - x0) / PT_PER_MM, (y1 - y0) / PT_PER_MM
+    s = min(W_mm / pw, H_mm / ph)
+    ox, oy = (W_mm - pw * s) / 2, (H_mm - ph * s) / 2
+    k = PT_PER_MM / s
+    return [x0 + (el["x"] - ox) * k, y1 - (el["y"] + el["h"] - oy) * k,
+            x0 + (el["x"] + el["w"] - ox) * k, y1 - (el["y"] - oy) * k]
+
+
 def _pdf_date(dt):
     return dt.strftime("D:%Y%m%d%H%M%S+00'00'")
 
@@ -184,13 +212,12 @@ def wrap(src, out, print_pdf=None, viewer=None):
     src, out = Path(src), Path(out)
     z, doc = load_3df(src)
     W_mm, H_mm = doc["page"]["width_mm"], doc["page"]["height_mm"]
-    pdf = pikepdf.open(print_pdf) if print_pdf else draw_pages(z, doc)
+    pdf = open_pdf(print_pdf) if print_pdf else draw_pages(z, doc)
     if len(pdf.pages) != len(doc["pages"]):
         raise threedf.ThreeDFError(f"print PDF has {len(pdf.pages)} pages but the .3df has {len(doc['pages'])}")
-    for i, pg in enumerate(pdf.pages, 1):
-        mb = [float(v) for v in pg.mediabox]
-        if abs((mb[2] - mb[0]) / PT_PER_MM - W_mm) > 1 or abs((mb[3] - mb[1]) / PT_PER_MM - H_mm) > 1:
-            raise threedf.ThreeDFError(f"print PDF page {i} is not {W_mm} x {H_mm} mm")
+    mb = [float(v) for v in pdf.pages[0].mediabox]
+    if abs((mb[2] - mb[0]) / PT_PER_MM - W_mm) > 1 or abs((mb[3] - mb[1]) / PT_PER_MM - H_mm) > 1:
+        raise threedf.ThreeDFError(f"print PDF page 1 is not {W_mm} x {H_mm} mm like the .3df")
     if "/AF" in pdf.Root or "/Names" in pdf.Root and "/EmbeddedFiles" in pdf.Root.Names:
         raise threedf.ThreeDFError("this PDF already carries attachments; wrap a clean print edition")
 
@@ -210,9 +237,7 @@ def wrap(src, out, print_pdf=None, viewer=None):
     n = 0
     for pi, ei, el in moving_elements(doc):
         pg = pdf.pages[pi]
-        x0, y0, x1, y1 = (float(v) for v in pg.mediabox)
-        k = (x1 - x0) / W_mm
-        rect = [x0 + el["x"] * k, y1 - (el["y"] + el["h"]) * k, x0 + (el["x"] + el["w"]) * k, y1 - el["y"] * k]
+        rect = page_rect(pg.mediabox, W_mm, H_mm, el)
         kind = "3D model" if el["type"] == "model" else "Animated figure"
         annot = pdf.make_indirect(Dictionary(
             Type=Name.Annot, Subtype=Name.Link, Rect=Array([round(v, 3) for v in rect]),
@@ -241,7 +266,7 @@ def _find_3df(pdf):
 
 
 def extract(path, out=None):
-    pdf = pikepdf.open(path)
+    pdf = open_pdf(path)
     spec, data = _find_3df(pdf)
     if data is None:
         raise threedf.ThreeDFError("no 3DF document attached to this PDF")
@@ -256,7 +281,7 @@ def extract(path, out=None):
 def check(path):
     """Human-readable report; returns (ok, lines)."""
     lines, ok = [], True
-    pdf = pikepdf.open(path)
+    pdf = open_pdf(path)
     xmp = pdf.Root.Metadata.read_bytes().decode("utf-8", "replace") if "/Metadata" in pdf.Root else ""
     part = re.search(r"pdfaid:part(?:>|=\")(\d)", xmp)
     conf = re.search(r"pdfaid:conformance(?:>|=\")(\w)", xmp)
@@ -300,14 +325,12 @@ def check(path):
             if nm.startswith("3df:"):
                 seen[nm] = (pi, [float(v) for v in a.Rect])
     lines.append(f"Moving elements: {len(want)} in the .3df, {len(seen)} marked on the pages")
-    W_mm = doc["page"]["width_mm"]
+    W_mm, H_mm = doc["page"]["width_mm"], doc["page"]["height_mm"]
     for nm, (pi, el) in want.items():
         if nm not in seen:
             ok = False; lines.append(f"  {nm} has no annotation"); continue
         spi, r = seen[nm]
-        x0, _, x1, y1 = (float(v) for v in pdf.pages[spi].mediabox)
-        k = (x1 - x0) / W_mm
-        exp = [x0 + el["x"] * k, y1 - (el["y"] + el["h"]) * k, x0 + (el["x"] + el["w"]) * k, y1 - el["y"] * k]
+        exp = page_rect(pdf.pages[spi].mediabox, W_mm, H_mm, el)
         if spi != pi or max(abs(a - b) for a, b in zip(r, exp)) > 0.5:
             ok = False; lines.append(f"  {nm} is not where the .3df puts it")
     others = [str(s.get("/UF", s.get("/F"))) for s in pdf.Root.get("/AF", Array()) if s.objgen != spec.objgen]

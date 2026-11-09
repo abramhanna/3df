@@ -28,6 +28,10 @@ def build(demo=None, out=None):
     html = html.replace("__PDFJS__", inline(V / "pdf.min.js"), 1)
     html = html.replace("__JSZIP__", inline(V / "jszip.min.js"), 1)
     if demo:
+        if not Path(demo).is_file():
+            raise SystemExit(f"{demo} not found")
+        if not Path(demo).read_bytes()[:1024].lstrip().startswith(b"%PDF-"):
+            raise SystemExit(f"{Path(demo).name} is not a PDF")
         data = base64.b64encode(Path(demo).read_bytes()).decode()
         data = "\n".join(data[i:i + 120] for i in range(0, len(data), 120))
         html = html.replace("__DEMO_B64__", data, 1).replace("__DEMO_NAME__", Path(demo).name.replace('"', ""), 1)

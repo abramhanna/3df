@@ -17,6 +17,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import safety
 import threedf
 
 PX_PER_MM = 96 / 25.4
@@ -84,6 +85,10 @@ def convert(src, out=None):
     errs = threedf.validate(src)
     if errs:
         raise threedf.ThreeDFError(f"{src} is not a valid .3df:\n" + "\n".join(errs))
+    try:
+        safety.check_3df(src)
+    except safety.UnsafePackage as e:
+        raise threedf.ThreeDFError(str(e)) from None
     out = Path(out or src.with_suffix(".epub"))
     z = zipfile.ZipFile(src)
     doc = json.loads(z.read("document.json"))
