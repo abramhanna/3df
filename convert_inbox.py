@@ -77,8 +77,9 @@ def convert(docx, outbox):
 
 
 def main():
-    inbox = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "inbox"
-    outbox = Path(sys.argv[2]) if len(sys.argv) > 2 else HERE / "outbox"
+    # resolve now: the tools run from this script's folder, so relative paths would point elsewhere
+    inbox = (Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "inbox").resolve()
+    outbox = (Path(sys.argv[2]) if len(sys.argv) > 2 else HERE / "outbox").resolve()
     outbox.mkdir(parents=True, exist_ok=True)
     files = sorted(p for p in inbox.iterdir() if p.is_file() and p.name not in IGNORE) if inbox.is_dir() else []
     summary = ["## 3DF conversions", ""]
