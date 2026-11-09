@@ -1,4 +1,26 @@
-# 3DF
+# 3DF Converters
+
+Turn a Google Docs report with GIFs into one file that opens on any phone or computer, offline, and still moves.
+
+![Demo on a phone: dragging a figure to step through it, turning a truss by hand, and turning and tilting a 3D model](docs/demo.gif)
+
+Built on [3DF](https://github.com/mfogelson/3df), the open-source document format created by Mitchell Fogelson (MIT license). The format, its specification and the original tools are his; this repository adds converters, exports and tests around it.
+
+## What this adds
+
+- **Google Docs and Word to 3DF** (`docx2_3df.py`): keeps the page layout and searchable text, and lays each GIF back over its spot so it plays. Handles cropped, resized and transparent GIFs, header logos and landscape pages.
+- **A page with no code inside** (`3df2html.py`): one `.html` file that opens offline in any browser or phone preview. GIFs play; GIFs marked `[drag]` in their alt text can be stepped through by hand; 3D models turn and tilt.
+- **PDF and ebook versions** (`pdf3df.py`, `3df2epub.py`): a real PDF that opens everywhere with still images and carries the `.3df` inside, and an EPUB where GIFs play in Apple Books.
+- **Convert without installing anything**: upload a `.docx` to [`inbox`](inbox) on GitHub and the results appear in [`outbox`](outbox) a couple of minutes later.
+- **Safety and tests**: size limits and image checks before export, and 41 automated checks, including hostile inputs.
+
+## Status
+
+Working prototype. Tested on real Google Docs exports, iPhone (Safari and Files preview), and Chrome with JavaScript disabled. Not yet tested on Firefox, Android, or LibreOffice versions other than 24.2. Anything that can't move falls back to a still image, so files always open.
+
+---
+
+# The 3DF format
  
 3DF (`.3df`) is a fixed-layout document format, like PDF, that also supports animated images and interactive 3D models (glTF). See [SPEC.md](SPEC.md).
  
