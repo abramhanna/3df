@@ -18,7 +18,8 @@
 | `render_views.py` | Pre-render a glTF model from 36 directions at 4 heights, with the viewer's own three.js camera and lighting |
 | `viewer_template.html` | Browser viewer; `build_viewer.py` embeds a sample document into it |
 | `make_sample.py`, `make_test_deck.py`, `make_test_report.py` | Generate the sample document and converter test files |
-| `tests/` | `check_docx_geometry.py` (cropped and resized GIFs) and `check_static_html.py` (the no-JavaScript page, in a browser with JavaScript off) |
+| `tests/` | `check_docx_geometry.py` (cropped and resized GIFs), `check_static_html.py` (the no-JavaScript page, in a browser with JavaScript off) and `check_robustness.py` (messy documents and hostile inputs) |
+| `safety.py` | Size limits and image checks applied before a package is exported |
 | `vendor/` | three.js r128 and its GLTFLoader (MIT), used by `render_views.py` |
 | `make_readme_gif.py` | Render `docs/sample.gif`, the animated preview above |
  

@@ -40,6 +40,7 @@ from PIL import Image, ImageSequence
 
 import subprocess
 
+import safety
 import threedf
 from pptx2_3df import find_soffice
 
@@ -148,6 +149,23 @@ def fit_gif(blob, crop, display_aspect):
     return out.getvalue()
 
 
+def embedded_image(pdoc, xref):
+    """The picture as stored in the PDF, with its soft mask (transparency) applied, so a GIF with
+    a transparent background compares the same as the GIF itself (both flattened onto white)."""
+    p = pymupdf.Pixmap(pdoc, xref)
+    if p.n - p.alpha >= 4 or p.n - p.alpha == 1:
+        p = pymupdf.Pixmap(pymupdf.csRGB, p)
+    smask = pdoc.xref_get_key(xref, "SMask")
+    if smask[0] == "xref" and not p.alpha:
+        try:
+            mask = pymupdf.Pixmap(pdoc, int(smask[1].split()[0]))
+            if (mask.width, mask.height) == (p.width, p.height):
+                p = pymupdf.Pixmap(p, mask)
+        except Exception:
+            pass
+    return Image.frombytes("RGBA" if p.alpha else "RGB", (p.width, p.height), p.samples)
+
+
 def best_match(pix_img, gifs):
     """Compare against the embedded picture itself. Its pixel shape is the GIF's, however the
     document crops or stretches it on the page, so cropping and resizing don't break matching."""
@@ -208,6 +226,13 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
         sys.exit(f"{docx} not found")
     if docx.suffix.lower() != ".docx":
         sys.exit("Only .docx is supported. In Google Docs use File > Download > Microsoft Word (.docx).")
+    try:
+        safety.check_archive(docx, ".docx")
+        Document(docx)
+    except safety.UnsafePackage as e:
+        sys.exit(str(e))
+    except Exception:
+        sys.exit(f"{docx.name} is not a valid Word document. In Google Docs use File > Download > Microsoft Word (.docx).")
     gifs = animated_gifs(docx, gif_dir)
     pics = pictures(docx)
     props = Document(docx).core_properties
@@ -224,47 +249,52 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
         root = Path(tmp, "doc")
         (root / "assets").mkdir(parents=True)
         used, pages = {}, []
-        # LibreOffice draws pictures in document order, so the n-th image in the PDF is the
-        # n-th picture in the .docx. Only trust that when the counts agree.
-        n_drawn = sum(1 for pg in pdoc for info in pg.get_image_info(xrefs=True) if info.get("xref"))
-        geometry = n_drawn == len(pics)
-        if not geometry and pics:
-            warnings.append(f"The PDF draws {n_drawn} pictures but the document has {len(pics)}; "
-                            "crops and alt text may not be applied.")
-        pic_index = -1
+        # Each GIF match is paired with the next unused picture in the document that uses the same
+        # media file, in document order. Pictures the body doesn't contain (a header logo drawn on
+        # every page, say) don't shift the pairing, unlike counting every picture on the page.
+        queues = {}
+        for pic in pics:
+            queues.setdefault(pic["media"], []).append(pic)
+        no_pic = {"media": "", "alt": "", "crop": (0.0, 0.0, 0.0, 0.0)}
 
         for i, page in enumerate(pdoc, 1):
-            if abs(page.rect.width / PT_PER_MM - W_mm) > 0.5 or abs(page.rect.height / PT_PER_MM - H_mm) > 0.5:
-                warnings.append(f"Page {i}: size differs from page 1; 3DF v0.1 uses one page size, so it is scaled.")
-            sx, sy = W_mm / page.rect.width, H_mm / page.rect.height
+            pw, ph = page.rect.width / PT_PER_MM, page.rect.height / PT_PER_MM
+            # 3DF v0.1 has one page size. A page of another size (a landscape appendix) is scaled
+            # uniformly to fit and centred, never stretched.
+            k_mm = min(W_mm / pw, H_mm / ph) / PT_PER_MM          # mm on the 3DF page per PDF point
+            ox, oy = (W_mm - pw * k_mm * PT_PER_MM) / 2, (H_mm - ph * k_mm * PT_PER_MM) / 2
+            if abs(pw - W_mm) > 0.5 or abs(ph - H_mm) > 0.5:
+                warnings.append(f"Page {i} is {pw:.0f} x {ph:.0f} mm, not {W_mm:.0f} x {H_mm:.0f} mm like page 1; "
+                                "3DF v0.1 has one page size, so it is scaled down to fit, without distortion.")
+            X = lambda v: round(ox + v * k_mm, 2)
+            Y = lambda v: round(oy + v * k_mm, 2)
+            L = lambda v: round(v * k_mm, 2)
             pix = page.get_pixmap(dpi=dpi)
             bg = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             bg_file = save_page_image(bg, root / f"assets/page{i}")
             lines = text_lines(page)
-            elements = [{"type": "image", "x": 0, "y": 0, "w": round(W_mm, 2), "h": round(H_mm, 2),
-                         "src": f"assets/{bg_file.name}", "alt": f"Page {i}", "z": 0}]
+            elements = [{"type": "image", "x": round(ox, 2), "y": round(oy, 2), "w": L(page.rect.width),
+                         "h": L(page.rect.height), "src": f"assets/{bg_file.name}", "alt": f"Page {i}", "z": 0}]
 
             for k, info in enumerate(page.get_image_info(xrefs=True), 1):
                 if not info.get("xref"):
                     continue
-                pic_index += 1
-                pic = pics[pic_index] if geometry else {"media": "", "alt": "", "crop": (0.0, 0.0, 0.0, 0.0)}
-                # info["bbox"] is where the whole picture is placed; a crop clips it to a smaller window
-                full = pymupdf.Rect(info["bbox"])
-                l, t, r, b = pic["crop"]
-                bbox = pymupdf.Rect(full.x0 + l * full.width, full.y0 + t * full.height,
-                                    full.x1 - r * full.width, full.y1 - b * full.height) & page.rect
-                if bbox.is_empty or bbox.width < 4 or bbox.height < 4:
+                full = pymupdf.Rect(info["bbox"])   # where the whole picture is placed
+                if (full & page.rect).is_empty or full.width < 4 or full.height < 4:
                     continue
                 try:
-                    p = pymupdf.Pixmap(pdoc, info["xref"])
-                    if p.n - p.alpha >= 4:
-                        p = pymupdf.Pixmap(pymupdf.csRGB, p)
-                    shown = Image.frombytes("RGBA" if p.alpha else "RGB", (p.width, p.height), p.samples)
+                    shown = embedded_image(pdoc, info["xref"])
                 except Exception:
                     continue
                 g = best_match(shown, gifs)
                 if g is None:
+                    continue
+                queue = queues.get(g["name"]) or []
+                pic = queue.pop(0) if queue else no_pic
+                l, t, r, b = pic["crop"]              # a crop clips the placement to a smaller window
+                bbox = pymupdf.Rect(full.x0 + l * full.width, full.y0 + t * full.height,
+                                    full.x1 - r * full.width, full.y1 - b * full.height) & page.rect
+                if bbox.is_empty or bbox.width < 4 or bbox.height < 4:
                     continue
                 blob = fit_gif(g["blob"], pic["crop"], bbox.width / bbox.height)
                 key = (g["name"], hashlib.md5(blob).hexdigest())
@@ -278,8 +308,8 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
                                 round(bbox.x1 * scale), round(bbox.y1 * scale)))
                 fb = f"assets/page{i}_anim{k}_fallback.png"
                 crop.save(root / fb, optimize=True)
-                elements.append({"type": "image", "x": round(bbox.x0 * sx, 2), "y": round(bbox.y0 * sy, 2),
-                                 "w": round(bbox.width * sx, 2), "h": round(bbox.height * sy, 2),
+                elements.append({"type": "image", "x": X(bbox.x0), "y": Y(bbox.y0),
+                                 "w": L(bbox.width), "h": L(bbox.height),
                                  "src": src, "fallback": fb, "z": 1,
                                  "alt": pic["alt"] or caption_below(lines, bbox) or "Animated figure"})
                 alt_text = elements[-1]["alt"]
@@ -290,11 +320,11 @@ def convert(docx, out, dpi=150, soffice=None, gif_dir=None, pdf_out=None):
             for ln in lines:
                 h_pt = (ln["y1"] - ln["y0"]) * 1.25
                 elements.append({"type": "text", "text": ln["text"],
-                                 "x": round(ln["x0"] * sx, 2), "y": round(ln["y0"] * sy, 2),
+                                 "x": X(ln["x0"]), "y": Y(ln["y0"]),
                                  # extra width so a wider fallback font never wraps the invisible line
-                                 "w": round(max(W_mm - ln["x0"] * sx, (ln["x1"] - ln["x0"]) * sx), 2),
-                                 "h": round(h_pt * sy, 2),
-                                 "font_size_pt": round(ln["size"], 1), "color": INVISIBLE, "z": 2})
+                                 "w": round(max(ox + L(page.rect.width) - X(ln["x0"]), L(ln["x1"] - ln["x0"])), 2),
+                                 "h": L(h_pt),
+                                 "font_size_pt": round(ln["size"] * k_mm * PT_PER_MM, 1), "color": INVISIBLE, "z": 2})
             pages.append({"elements": elements})
 
         placed = {name for name, _ in used}

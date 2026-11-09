@@ -34,6 +34,7 @@ import io
 
 from PIL import Image, ImageSequence
 
+import safety
 import threedf
 # The .3df travels in a data block that browsers never run (see --embed)
 TAG_OPEN = '<script type="application/vnd.3df+zip" id="threedf-document" data-encoding="base64">'
@@ -51,13 +52,15 @@ SCRUB_REVS = 2          # turns available in one drag, since a scroller can't st
 MAX_FRAMES = 72
 
 
-def gif_frames(blob):
+def gif_frames(blob, max_width=None):
     """Data URLs for each frame of an animated image (JPEG, or PNG where there is transparency)."""
     im = Image.open(io.BytesIO(blob))
     frames = [f.convert("RGBA") for f in ImageSequence.Iterator(im)]
     step = max(1, -(-len(frames) // MAX_FRAMES))
     out = []
     for f in frames[::step]:
+        if max_width and f.width > max_width:          # no need to store more than the screen can show
+            f = f.resize((max_width, max(1, round(f.height * max_width / f.width))), Image.LANCZOS)
         buf = io.BytesIO()
         if f.getextrema()[3][0] < 255:
             f.save(buf, "PNG", optimize=True); mime = "image/png"
@@ -153,6 +156,10 @@ def convert(src, out=None, embed=False, views=True, warnings=None):
     errs = threedf.validate(src)
     if errs:
         raise threedf.ThreeDFError(f"{src} is not a valid .3df:\n" + "\n".join(errs))
+    try:
+        safety.check_3df(src)
+    except safety.UnsafePackage as e:
+        raise threedf.ThreeDFError(str(e)) from None
     out = Path(out or src.with_suffix(".html"))
     z = zipfile.ZipFile(src)
     doc = json.loads(z.read("document.json"))
@@ -181,7 +188,8 @@ def convert(src, out=None, embed=False, views=True, warnings=None):
             alt = esc(el.get("alt", ""))
             if el["type"] == "image":
                 animated = Path(el["src"]).suffix.lower() in ANIMATED and el.get("fallback")
-                frames = gif_frames(z.read(el["src"])) if animated and el.get("scrub") else []
+                frames = (gif_frames(z.read(el["src"]), max_width=round(el["w"] * 96 / 25.4 * 2))
+                          if animated and el.get("scrub") else [])
                 if len(frames) > 1:
                     parts.append(scrub_html(len(parts), box, data_url(el["src"]), data_url(el["fallback"]), alt, frames))
                 elif animated:
