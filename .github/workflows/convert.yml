@@ -1,0 +1,54 @@
+# Converts Word files uploaded to inbox/ into outbox/<name>/ (.3df, .html, .pdf, .epub).
+# Upload on github.com: open inbox/, then Add file > Upload files. Results appear in outbox/
+# a few minutes later. Runs on GitHub's computers; nothing to install.
+name: Convert inbox
+
+on:
+  push:
+    branches: [main]
+    paths: ["inbox/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: convert-inbox
+  cancel-in-progress: false
+
+jobs:
+  convert:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install LibreOffice and fonts
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            libreoffice-writer fonts-liberation fonts-dejavu-core \
+            fonts-crosextra-carlito fonts-crosextra-caladea fonts-noto-core
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+
+      - name: Convert
+        run: python convert_inbox.py
+
+      - name: Save results
+        run: |
+          git config user.name "3DF converter"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A inbox outbox
+          if git diff --cached --quiet; then
+            echo "Nothing new to save."
+          else
+            git commit -m "Convert inbox to outbox"
+            git push
+          fi
